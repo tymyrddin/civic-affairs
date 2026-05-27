@@ -1,0 +1,142 @@
+# Shuffle: automation and orchestration — shared by Quiet Room and Long Table
+# Verify image tags at github.com/Shuffle/Shuffle/releases.
+# Orborus requires Docker socket access to spawn workflow app containers.
+# This is a known Shuffle design trade-off: scope network and socket access appropriately.
+# OpenSearch security plugin is disabled (internal network only); enable TLS for production.
+
+services:
+  shuffle-backend:
+    image: ghcr.io/shuffle/shuffle:backend-1.4.0
+    restart: unless-stopped
+    hostname: shuffle-backend
+    env_file: .env
+    environment:
+      SHUFFLE_OPENSEARCH_URL: http://shuffle-opensearch:9200
+      BACKEND_HOSTNAME: shuffle-backend
+      BACKEND_PORT: "5001"
+    volumes:
+      - shuffle-apps:/shuffle-apps
+      - shuffle-files:/shuffle-files
+    depends_on:
+      shuffle-opensearch:
+        condition: service_healthy
+    networks:
+      - shuffle-internal
+      - pipeline-net
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  shuffle-frontend:
+    image: ghcr.io/shuffle/shuffle:frontend-1.4.0
+    restart: unless-stopped
+    environment:
+      BACKEND_HOSTNAME: shuffle-backend
+    ports:
+      - "127.0.0.1:3001:80"
+    depends_on:
+      - shuffle-backend
+    networks:
+      - shuffle-internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  shuffle-orborus:
+    image: ghcr.io/shuffle/shuffle:orborus-1.4.0
+    restart: unless-stopped
+    hostname: shuffle-orborus
+    env_file: .env
+    environment:
+      SHUFFLE_APP_SDK_VERSION: 1.4.0
+      ENVIRONMENT_NAME: production
+      BASE_URL: http://shuffle-backend:5001
+      DOCKER_API_VERSION: "1.45"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - shuffle-backend
+    networks:
+      - shuffle-internal
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  shuffle-opensearch:
+    image: opensearchproject/opensearch:2.12.0
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - shuffle-opensearch-data:/usr/share/opensearch/data
+    networks:
+      - shuffle-internal
+    cap_drop:
+      - ALL
+    cap_add:
+      - IPC_LOCK
+      - SYS_RESOURCE
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  shuffle-apps:
+  shuffle-files:
+  shuffle-opensearch-data:
+
+networks:
+  shuffle-internal:
+    driver: bridge
+    internal: true
+  pipeline-net:
+    external: true

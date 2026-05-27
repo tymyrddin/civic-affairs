@@ -1,0 +1,9 @@
+# Replace placeholder values before deploying.
+# Sign this file with the Receiving Desk PGP key and serve the signature at
+# /.well-known/security.txt.sig per RFC 9116.
+
+Contact: mailto:security@example.internal
+Expires: 2027-05-27T23:59:00.000Z
+Encryption: https://example.internal/pgp-key.asc
+Preferred-Languages: en
+Canonical: https://example.internal/.well-known/security.txt

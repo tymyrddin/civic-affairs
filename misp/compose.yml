@@ -1,0 +1,118 @@
+# MISP: signal store and routing layer
+# Verify image tag at github.com/MISP/misp-docker/releases before deploying.
+# Production: pin by digest — docker inspect --format='{{index .RepoDigests 0}}' IMAGE
+
+services:
+  misp:
+    image: ghcr.io/misp/misp-docker:v2.4.196
+    restart: unless-stopped
+    depends_on:
+      misp-db:
+        condition: service_healthy
+      misp-redis:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - misp-data:/var/www/MISP/app/files
+      - misp-logs:/var/www/MISP/app/tmp/logs
+    ports:
+      - "127.0.0.1:8080:80"
+    networks:
+      - misp-internal
+      - pipeline-net
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/users/login || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  misp-db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    env_file: .env
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=256M
+    volumes:
+      - misp-db-data:/var/lib/mysql
+    networks:
+      - misp-internal
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  misp-redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --requirepass ${REDIS_PASSWORD}
+      --bind 0.0.0.0
+      --protected-mode yes
+    networks:
+      - misp-internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  misp-data:
+  misp-db-data:
+  misp-logs:
+
+networks:
+  misp-internal:
+    driver: bridge
+    internal: true
+  pipeline-net:
+    name: pipeline-net
+    driver: bridge

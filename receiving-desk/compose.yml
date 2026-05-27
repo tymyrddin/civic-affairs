@@ -1,0 +1,120 @@
+# Receiving Desk: coordinated disclosure intake
+# Certs are managed by Certbot (certbot-letsencrypt volume).
+# Before first start, run: receiving-desk/init-certs.sh <domain.tld>
+# After Nginx is up, obtain the real cert:
+#   docker compose -f receiving-desk/compose.yml run --rm certbot \
+#     certonly --webroot -w /var/www/certbot -d yourdomain.tld
+# Then reload Nginx:
+#   docker compose -f receiving-desk/compose.yml exec nginx nginx -s reload
+# Certbot checks for renewal every 12 hours automatically.
+# After renewal: reload Nginx manually (see above).
+# The Tor hidden service address is generated on first run and stored in the tor-data volume.
+# Back up the hostname and private key files from that volume offline.
+# Loss of the private key means loss of the .onion address.
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - certbot
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/security.txt:/var/www/html/.well-known/security.txt:ro
+      - ./nginx/pgp-key.asc:/var/www/html/pgp-key.asc:ro
+      - certbot-letsencrypt:/etc/letsencrypt:ro
+      - certbot-challenges:/var/www/certbot:ro
+      - nginx-logs:/var/log/nginx
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    networks:
+      - desk-internal
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/cache/nginx:size=64m,mode=1777
+      - /var/run:size=10m,mode=1777
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/.well-known/security.txt || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+  certbot:
+    image: certbot/certbot:v2.10.0
+    restart: unless-stopped
+    volumes:
+      - certbot-letsencrypt:/etc/letsencrypt
+      - certbot-challenges:/var/www/certbot
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $$!; done'
+    networks:
+      - desk-internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  tor:
+    build:
+      context: ./tor
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - tor-data:/var/lib/tor
+    networks:
+      - desk-internal
+      - desk-external
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/lib/tor/hidden_service/hostname || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  nginx-logs:
+  tor-data:
+  certbot-letsencrypt:
+  certbot-challenges:
+
+networks:
+  desk-internal:
+    driver: bridge
+    internal: true
+  desk-external:
+    driver: bridge

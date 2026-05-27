@@ -1,0 +1,114 @@
+# Quiet Room: signal intake, normalisation, and classification
+# Suricata and Zeek use network_mode: host for packet capture on the sensor interface.
+# Set SENSOR_INTERFACE in .env to the interface carrying monitored traffic (e.g. eth0, ens3).
+# Suricata and Zeek write logs to named Docker volumes. Wire those volumes into a log
+# forwarder (e.g. Filebeat) to feed Shuffle for MISP ingestion.
+# Image versions: verify at hub.docker.com/r/jasonish/suricata and hub.docker.com/r/zeekurity/zeek.
+
+services:
+  suricata:
+    image: docker.io/jasonish/suricata:7.0.6
+    restart: unless-stopped
+    env_file: .env
+    command: ["-i", "${SENSOR_INTERFACE}"]
+    network_mode: host
+    volumes:
+      - suricata-logs:/var/log/suricata
+      - suricata-rules:/etc/suricata/rules
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/suricata/suricata-command.socket || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  zeek:
+    image: docker.io/zeekurity/zeek:6.0.4
+    restart: unless-stopped
+    env_file: .env
+    command: ["-i", "${SENSOR_INTERFACE}"]
+    network_mode: host
+    volumes:
+      - zeek-logs:/opt/zeek/logs
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x zeek || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.9.0
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - wazuh-data:/var/ossec/data
+      - wazuh-logs:/var/ossec/logs
+      - wazuh-etc:/var/ossec/etc
+      - wazuh-queue:/var/ossec/queue
+    ports:
+      - "0.0.0.0:1514:1514/udp"
+      - "0.0.0.0:1514:1514/tcp"
+      - "127.0.0.1:55000:55000"
+    networks:
+      - quiet-room-internal
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - SYS_CHROOT
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "ss -tlnp | grep -q ':55000' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  suricata-logs:
+  suricata-rules:
+  zeek-logs:
+  wazuh-data:
+  wazuh-logs:
+  wazuh-etc:
+  wazuh-queue:
+
+networks:
+  quiet-room-internal:
+    driver: bridge
+    internal: true

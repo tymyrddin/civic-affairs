@@ -1,0 +1,20 @@
+# Secrets — copy env.example to .env locally; never commit .env
+# env.example files are intentionally tracked.
+**/.env
+**/.env.*
+
+# TLS certificates (bind-mount fallback; certs are Docker-volume-managed in production)
+receiving-desk/nginx/certs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
