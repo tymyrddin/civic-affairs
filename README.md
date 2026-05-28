@@ -239,3 +239,7 @@ worth addressing before a production deployment.
 - External volumes: `certbot-letsencrypt` and `globaleaks_globaleaks-data` are declared external and survive
   `./ctl down --volumes`. `./ctl purge` removes both. To remove them by hand:
   `docker volume rm certbot-letsencrypt globaleaks_globaleaks-data`.
+
+## License
+
+[Unlicense](LICENSE)
