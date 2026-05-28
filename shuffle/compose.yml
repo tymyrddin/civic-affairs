@@ -1,12 +1,12 @@
 # Shuffle: automation and orchestration — shared by Quiet Room and Long Table
-# Verify image tags at github.com/Shuffle/Shuffle/releases.
+# Images: ghcr.io/shuffle/shuffle-{backend,frontend,orborus} — verify tags at github.com/orgs/Shuffle/packages
 # Orborus requires Docker socket access to spawn workflow app containers.
 # This is a known Shuffle design trade-off: scope network and socket access appropriately.
 # OpenSearch security plugin is disabled (internal network only); enable TLS for production.
 
 services:
   shuffle-backend:
-    image: ghcr.io/shuffle/shuffle:backend-1.4.0
+    image: ghcr.io/shuffle/shuffle-backend:1.4.0
     restart: unless-stopped
     hostname: shuffle-backend
     env_file: .env
@@ -17,6 +17,7 @@ services:
     volumes:
       - shuffle-apps:/shuffle-apps
       - shuffle-files:/shuffle-files
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       shuffle-opensearch:
         condition: service_healthy
@@ -32,11 +33,11 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:5001/api/v1/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qS -O /dev/null http://localhost:5001/api/v1/health 2>&1 | grep -qE 'HTTP/[0-9]'"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 5
+      start_period: 90s
     logging:
       driver: json-file
       options:
@@ -44,7 +45,7 @@ services:
         max-file: "5"
 
   shuffle-frontend:
-    image: ghcr.io/shuffle/shuffle:frontend-1.4.0
+    image: ghcr.io/shuffle/shuffle-frontend:1.4.0
     restart: unless-stopped
     environment:
       BACKEND_HOSTNAME: shuffle-backend
@@ -54,8 +55,13 @@ services:
       - shuffle-backend
     networks:
       - shuffle-internal
+      - shuffle-public
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     logging:
@@ -65,7 +71,7 @@ services:
         max-file: "3"
 
   shuffle-orborus:
-    image: ghcr.io/shuffle/shuffle:orborus-1.4.0
+    image: ghcr.io/shuffle/shuffle-orborus:1.4.0
     restart: unless-stopped
     hostname: shuffle-orborus
     env_file: .env
@@ -138,5 +144,7 @@ networks:
   shuffle-internal:
     driver: bridge
     internal: true
+  shuffle-public:
+    driver: bridge
   pipeline-net:
     external: true

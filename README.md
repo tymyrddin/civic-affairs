@@ -4,7 +4,7 @@ Signal intake, threat correlation, hardware analysis, and coordinated disclosure
 Civic Defence Establishment.
 
 Four operational divisions with distinct data domains and tool stacks. Divisional boundaries
-reflect organisational structure, not data flow; this repository covers the full pipeline.
+reflect [organisational structure](docs/divisions.md), not data flow; this repository covers the full pipeline.
 
 ## Pipeline
 
@@ -27,77 +27,42 @@ with analysts. Provenance records track acquisition path, not truth ancestry.
 The Receiving Desk handles disclosure intake and routes each case to the appropriate division.
 The Repair Shop handles devices that require physical access.
 
-## Quiet Room
+## Requirements
 
-Signal intake, normalisation, and classification. Suricata and Zeek run on network perimeter
-sensors and are complementary: Suricata triggers on rule signatures; Zeek captures full connection
-metadata regardless of whether a signature fires. Wazuh provides host-level telemetry on a
-selective basis, assigned by group at deployment, not filtered at analysis time.
+- Docker Engine 24 or later with the Compose plugin (v2). The `docker compose` command, not legacy `docker-compose`.
+- Linux host. Suricata and Zeek use `network_mode: host` for packet capture and do not work on macOS or Windows Docker
+  Desktop without reworking those services.
+- 16 GB RAM available to Docker is a comfortable baseline. OpenSearch runs two separate instances (Shuffle and OpenCTI),
+  alongside MISP and Wazuh, each holding significant heap.
+- A monitored network interface. Run `ip link show` to identify it; the Quiet Room startup check will list available
+  interfaces if the value in `quiet-room/.env` is missing or wrong.
+- For the Receiving Desk: a public domain name with port 80 reachable from the internet for Let's Encrypt HTTP-01
+  challenge validation.
 
-Incoming material is classified on two axes: source taxonomy (Society notification, Office
-advisory, or Other) and reliability (1–5). Scores are auto-assigned on intake from source taxonomy
-defaults. Analyst review is required before material is escalated or routed above the reliability
-threshold. Manual override is available at any stage. The automation handles volume; the analyst
-handles adjudication.
+## Quickstart
 
-Material at reliability 3 or above with clear source attribution is written to MISP and routed to
-the Long Table. Material below threshold is dropped and logged. The drop log is retained for 90
-days for retrospective analysis.
+Generate secrets and prepare the environment:
 
-The Quiet Room characterises. It does not interpret or investigate.
+```
+./ctl init
+```
 
-Stack: Suricata, Zeek, Wazuh, MISP, Shuffle.
+Open `quiet-room/.env` and set the monitored network interface:
 
-## Long Table
+```
+SENSOR_INTERFACE=enp34s0
+```
 
-Correlation, interpretation, and escalation. Receives classified signals from the Quiet Room as
-MISP events — IP addresses, domains, certificates, file hashes, network behaviour patterns — and
-correlates them across time and source. Enrichment draws on RIPE NCC (prefix and ASN data), CIRCL
-passive DNS (domain history), and crt.sh (certificate transparency).
+`./ctl init` lists available interfaces if the value is missing. Use the interface carrying the traffic to monitor.
 
-An analyst reviews the correlated picture and produces a consolidated assessment: attributed
-infrastructure, campaign patterns, confidence levels, and a routing determination. The Long Table
-produces one view; it does not append alternatives.
+Bring the pipeline up:
 
-The Long Table's domain is the threat actor. Firmware vulnerability findings and CVE enrichment
-belong to the Watch Tower, which runs on the Office's infrastructure. The two domains are adjacent:
-a vulnerability being actively exploited produces both a Watch Tower finding and a Quiet Room
-signal. Whether the two instances share events, and under what rules, is an open architectural
-question.
+```
+./ctl up
+```
 
-MISP galaxies and event correlation may be sufficient for actor attribution and campaign tracking
-at expected event volume. OpenCTI (Filigran, France) provides relationship graph and actor mapping
-that MISP does not handle as natively, at the cost of a VC-backed dependency. The choice between
-MISP alone and MISP + OpenCTI is unresolved.
-
-Stack: MISP, Shuffle, RIPE NCC API, CIRCL passive DNS, crt.sh. OpenCTI: under evaluation.
-
-## Repair Shop
-
-Active hardware and firmware analysis. Works with devices in hand under conditions that do not
-permit engagement through normal channels. JTAG and SWD debug interfaces, physical teardown,
-direct flash storage access, and offline binary analysis.
-
-Covers three classes of work: devices that cannot be assessed through network-layer approaches,
-supply chain material requiring verification before deployment, and hardware submitted through the
-Receiving Desk whose provenance or contents warrant examination before the material is trusted.
-
-Analysis runs in offline, isolated environments. Output is reviewed before anything leaves.
-
-## Receiving Desk
-
-Coordinated vulnerability disclosure intake. Three channels: security.txt for standard
-submissions, PGP-encrypted email for sensitive identified submissions, and a Tor onion service for
-anonymous material whose provenance is not recorded.
-
-Every submission produces a case record. Triage routes each case to the appropriate division:
-signals-layer findings to the Quiet Room, intelligence-layer findings to the Long Table, hardware
-or firmware submissions to the Repair Shop. Submissions spanning categories are split and routed
-separately.
-
-Identified submitters receive acknowledgement within two working days, triage determination within
-ten, and escalation status within thirty. Anonymous submissions receive their case reference
-through the same Tor onion service used to submit.
+On first boot, MISP generates DH parameters and imports the database schema. Allow three to five minutes before the
+MISP container reports healthy.
 
 ## Infrastructure
 
@@ -113,8 +78,81 @@ Per-division Docker Compose files. One control script.
 `misp/` starts first and creates `pipeline-net`. `shuffle/` and `long-table/` join it as
 external and will not start without it.
 
-Each division has an `env.example`. Copy to `.env` and set values before first start.
+Each division has an `env.example` showing available variables. `./ctl init` copies these to `.env` files and fills in generated secrets; manual copying is not needed.
 
 The Receiving Desk requires a TLS certificate before Nginx starts. Run
 `receiving-desk/init-certs.sh <domain>` to seed a temporary self-signed cert into the Certbot
 volume, then obtain a real Let's Encrypt certificate once the stack is running.
+
+## Usage
+
+Credentials for all services are written to `.env` files by `./ctl init`. Read them there; nothing is printed to the terminal.
+
+URLs below are for local testing. For a remote deployment, replace `127.0.0.1` with the server's hostname or IP throughout.
+
+### MISP
+
+Available at https://127.0.0.1:8443. The browser will warn about a self-signed certificate; accept it to proceed.
+
+Log in with `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `misp/.env`. On first login MISP asks you to confirm the organisation name and change the password; work through those prompts before doing anything else.
+
+The MISP connector in OpenCTI only imports MISP events tagged `Long-Table`, `tlp:white`, or `tlp:green`. Events without one of those tags do not cross to OpenCTI.
+
+### OpenCTI (Long Table)
+
+Available at http://127.0.0.1:8888.
+
+Log in with `OPENCTI_ADMIN_EMAIL` and `OPENCTI_ADMIN_PASSWORD` from `long-table/.env`.
+
+### Shuffle
+
+Available at http://127.0.0.1:3001.
+
+Shuffle has no pre-set admin account. On the first visit it prompts you to create one. Do that before attempting to use workflows.
+
+### Wazuh
+
+The Wazuh API runs at https://127.0.0.1:55000. It does not serve a browser interface and returns a 401 on direct access. It uses JWT authentication.
+
+Get a token (replace `<API_PASSWORD>` with the value of `API_PASSWORD` from `quiet-room/.env`):
+
+```
+curl -k -u wazuh-wui:<API_PASSWORD> \
+  -X POST "https://127.0.0.1:55000/security/user/authenticate?raw=true"
+```
+
+The command prints a token string. Tokens expire after 15 minutes. Use it in subsequent requests:
+
+```
+curl -k -H "Authorization: Bearer <token>" https://127.0.0.1:55000/
+```
+
+Wazuh agents are installed separately on the hosts to be monitored. The manager listens on 1514/tcp and 1514/udp for agent connections.
+
+### Quiet Room signal path
+
+Suricata and Zeek write logs to named Docker volumes (`suricata-logs`, `zeek-logs`). Nothing reads those volumes at present. The pipeline diagram shows Quiet Room feeding MISP, but the log-forwarding step is not yet configured. Signal capture runs and logs accumulate, but no MISP events are generated from network traffic until a log forwarder (Filebeat or similar) is wired into those volumes.
+
+Wazuh host telemetry follows a separate path and works once agents are enrolled.
+
+### Receiving Desk
+
+For local testing, `./ctl init` seeds a self-signed certificate; the Receiving Desk starts with that.
+
+For production, obtain a real certificate once the stack is up and port 80 is reachable from the internet:
+
+```
+docker compose -f receiving-desk/compose.yml run --rm certbot \
+  certonly --webroot -w /var/www/certbot -d yourdomain.tld
+```
+
+Then reload Nginx:
+
+```
+docker compose -f receiving-desk/compose.yml exec nginx nginx -s reload
+```
+
+Also replace `receiving-desk/nginx/security.txt` with real contact details and the correct encryption key fingerprint,
+and update the domain in `receiving-desk/nginx/nginx.conf`. The Tor hidden service address is generated on first start
+and stored in the `tor-data` volume. Back up the hostname and private key files from that volume; losing the private key
+means losing the `.onion` address permanently.

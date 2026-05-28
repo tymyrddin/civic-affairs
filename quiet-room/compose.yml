@@ -3,7 +3,7 @@
 # Set SENSOR_INTERFACE in .env to the interface carrying monitored traffic (e.g. eth0, ens3).
 # Suricata and Zeek write logs to named Docker volumes. Wire those volumes into a log
 # forwarder (e.g. Filebeat) to feed Shuffle for MISP ingestion.
-# Image versions: verify at hub.docker.com/r/jasonish/suricata and hub.docker.com/r/zeekurity/zeek.
+# Image versions: verify at hub.docker.com/r/jasonish/suricata and hub.docker.com/r/zeek/zeek.
 
 services:
   suricata:
@@ -18,11 +18,14 @@ services:
     cap_drop:
       - ALL
     cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - SETPCAP
       - NET_ADMIN
       - NET_RAW
       - SYS_NICE
-    security_opt:
-      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "test -S /var/run/suricata/suricata-command.socket || exit 1"]
       interval: 30s
@@ -36,10 +39,10 @@ services:
         max-file: "10"
 
   zeek:
-    image: docker.io/zeekurity/zeek:6.0.4
+    image: docker.io/zeek/zeek:6.0.4
     restart: unless-stopped
     env_file: .env
-    command: ["-i", "${SENSOR_INTERFACE}"]
+    command: ["zeek", "-i", "${SENSOR_INTERFACE}", "local"]
     network_mode: host
     volumes:
       - zeek-logs:/opt/zeek/logs
@@ -51,7 +54,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -x zeek || exit 1"]
+      test: ["CMD-SHELL", "ls /proc/*/exe 2>/dev/null | xargs -I{} readlink {} 2>/dev/null | grep -q zeek"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -77,18 +80,20 @@ services:
       - "127.0.0.1:55000:55000"
     networks:
       - quiet-room-internal
+      - quiet-room-public
     cap_drop:
       - ALL
     cap_add:
       - CHOWN
       - DAC_OVERRIDE
+      - FOWNER
       - SETUID
       - SETGID
       - SYS_CHROOT
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "ss -tlnp | grep -q ':55000' || exit 1"]
+      test: ["CMD-SHELL", "curl -skf https://localhost:55000/ -o /dev/null -w '%{http_code}' | grep -qE '^[0-9]'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -112,3 +117,5 @@ networks:
   quiet-room-internal:
     driver: bridge
     internal: true
+  quiet-room-public:
+    driver: bridge

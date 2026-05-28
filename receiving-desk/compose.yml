@@ -69,6 +69,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /etc/letsencrypt/live/localhost/fullchain.pem"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -110,6 +116,7 @@ volumes:
   nginx-logs:
   tor-data:
   certbot-letsencrypt:
+    external: true
   certbot-challenges:
 
 networks:

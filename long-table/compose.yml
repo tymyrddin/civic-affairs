@@ -4,14 +4,14 @@
 # The MISP connector imports events from MISP into OpenCTI on a configurable interval.
 # OPENCTI_ADMIN_TOKEN must be a valid UUID — generate with: uuidgen
 # CONNECTOR_MISP_ID must also be a valid UUID — generate a separate one.
-# xpack.security is disabled on Elasticsearch (internal network only); enable for production.
+# OpenSearch security plugin is disabled (internal network only).
 
 services:
   opencti:
     image: opencti/platform:6.2.0
     restart: unless-stopped
     depends_on:
-      opencti-elasticsearch:
+      opencti-opensearch:
         condition: service_healthy
       opencti-redis:
         condition: service_healthy
@@ -31,7 +31,7 @@ services:
       REDIS__HOSTNAME: opencti-redis
       REDIS__PORT: "6379"
       REDIS__PASSWORD: ${OPENCTI_REDIS_PASSWORD}
-      ELASTICSEARCH__URL: http://opencti-elasticsearch:9200
+      ELASTICSEARCH__URL: http://opencti-opensearch:9200
       MINIO__ENDPOINT: opencti-minio
       MINIO__PORT: "9000"
       MINIO__USE_SSL: "false"
@@ -59,7 +59,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qS -O /dev/null http://localhost:8080/health 2>&1 | grep -q 'HTTP/'"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -94,6 +94,7 @@ services:
 
   opencti-connector-misp:
     image: opencti/connector-misp:6.2.0
+    profiles: [misp]
     restart: unless-stopped
     environment:
       OPENCTI_URL: http://opencti:8080
@@ -127,16 +128,16 @@ services:
         max-size: "20m"
         max-file: "3"
 
-  opencti-elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+  opencti-opensearch:
+    image: opensearchproject/opensearch:2.12.0
     restart: unless-stopped
     environment:
       discovery.type: single-node
-      xpack.security.enabled: "false"
-      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
       cluster.name: opencti
     volumes:
-      - opencti-esdata:/usr/share/elasticsearch/data
+      - opencti-esdata:/usr/share/opensearch/data
     networks:
       - long-table-internal
     cap_drop:
@@ -168,6 +169,7 @@ services:
   opencti-redis:
     image: redis:7.2-alpine
     restart: unless-stopped
+    user: redis
     command: >
       redis-server
       --save ""
@@ -246,10 +248,10 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "nc -z localhost 5672"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       start_period: 30s
     logging:
       driver: json-file

@@ -41,6 +41,14 @@ service definitions in `long-table/compose.yml` means the stack is ready to acti
 requiring a separate implementation step when the decision lands. The services can be commented
 out or left stopped until then.
 
+## OpenSearch over Elasticsearch for OpenCTI
+
+OpenCTI 6.x supports both Elasticsearch 8.x and OpenSearch 2.x. OpenSearch is Apache 2.0
+licensed; Elasticsearch uses the Elastic License (source-available, not OSI-approved). The stack
+already runs OpenSearch for Shuffle, making it the known quantity. Two separate OpenSearch
+instances run concurrently: one for Shuffle, one for OpenCTI. They are not shared, as each tool
+manages its own index lifecycle.
+
 ## Wazuh: manager only
 
 The Wazuh indexer and dashboard are excluded. Agents are deployed separately on pipeline hosts
@@ -58,9 +66,13 @@ sensors that are explicitly intended to see all traffic. These containers do not
 ## Capability model
 
 `cap_drop: ALL` on every service, with capabilities added back individually. `no-new-privileges:
-true` on every service. `read_only: true` with tmpfs mounts where the image allows it (Redis,
-Nginx, Tor, Certbot). Services that genuinely require write access to their filesystem (MISP,
-MariaDB, Wazuh, OpenSearch, OpenCTI, Shuffle) are not run read-only.
+true` on all services except Suricata. Suricata uses libcap-ng's `capng_change_id` to drop
+from root to the suricata user after binding the interface; this calls `prctl(PR_SET_KEEPCAPS)`
+to retain capabilities across the UID change, which `no-new-privileges` blocks. The explicit
+`cap_drop: ALL` still constrains Suricata's permitted set. `read_only: true` with tmpfs mounts
+where the image allows it (Redis, Nginx, Tor, Certbot). Services that genuinely require write
+access to their filesystem (MISP, MariaDB, Wazuh, OpenSearch, OpenCTI, Shuffle) are not run
+read-only.
 
 ## Port binding
 
