@@ -240,6 +240,6 @@ worth addressing before a production deployment.
   `./ctl down --volumes`. `./ctl purge` removes both. To remove them by hand:
   `docker volume rm certbot-letsencrypt globaleaks_globaleaks-data`.
 
-## License
+## Licence
 
-[Unlicense](LICENSE)
+[Unlicence](LICENCE)
