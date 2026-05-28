@@ -61,7 +61,8 @@ Packet capture requires `NET_ADMIN` and `NET_RAW` capabilities with access to th
 interface. `network_mode: host` is the cleanest approach for sensor containers; the alternative
 (bridge network with capabilities) adds complexity without meaningful isolation benefit for
 sensors that are explicitly intended to see all traffic. These containers do not join
-`pipeline-net`; log forwarding to Shuffle is a separate configuration step.
+`pipeline-net`; they write logs to named Docker volumes, and a separate classifier container
+(which does join `pipeline-net`) reads those volumes and forwards to MISP.
 
 ## Capability model
 
@@ -78,21 +79,76 @@ read-only.
 
 Internal-only services (MISP web UI, Wazuh REST API, Shuffle frontend, OpenCTI platform) bind
 to `127.0.0.1` on the host. Only externally intended ports (Wazuh agent listener on 1514,
-Nginx on 80 and 443) bind to `0.0.0.0`. This is a defence-in-depth measure; firewall rules
-should still restrict 1514 to authorised agent addresses.
+Nginx on 80 and 443) bind to `0.0.0.0`. This is a defence-in-depth measure; firewall rules restricting 1514 to authorised agent
+addresses are worth applying.
 
 ## TLS certificates: Certbot with HTTP-01
 
 Let's Encrypt via Certbot. The HTTP-01 challenge requires port 80 to be externally accessible,
 which freed the former Tor listener from port 80. The Tor hidden service listener moved to port
 8080 internally; `torrc` maps the hidden service port 80 to `nginx:8080`. A Certbot renewal
-loop runs every 12 hours inside the container; Nginx requires a manual reload after renewal
-(`docker compose exec nginx nginx -s reload`). `init-certs.sh` seeds a temporary self-signed
-cert into the Certbot volume on first run so Nginx can start before a real certificate exists.
+loop runs every 12 hours inside the container; Nginx requires a container restart after renewal
+to pick up the new certificate path (the nginx Docker image processes cert-path templates at
+startup, not on reload). `./ctl init` calls `init-certs.sh` automatically to seed the bootstrap
+certificate on first run.
 
 Alternatives considered: DNS-01 challenge (avoids exposing port 80 but requires DNS provider
 API credentials and per-provider integration), self-signed only (not appropriate for a
 public-facing disclosure endpoint).
+
+## Bootstrap certificate domain
+
+The default domain for the initial self-signed certificate is `bootstrap.invalid`. The `.invalid`
+TLD is reserved (RFC 2606) for non-resolvable placeholders and cannot be mistaken for a
+legitimate cert. The bootstrap cert lives under `live/bootstrap.invalid/`; when the operator
+switches to a real domain, nginx is restarted and picks up the cert at `live/<domain>/` instead.
+The two paths do not overlap, so temporary trust material never quietly occupies the production
+certificate directory.
+
+The DOMAIN variable in `receiving-desk/.env` drives the cert path. Setting `DOMAIN=yourdomain.tld`
+and restarting nginx is the only step needed to transition from bootstrap to production.
+
+## Classifier: Suricata alerts to MISP
+
+The classifier container in `quiet-room/` tails Suricata's EVE JSON log and creates MISP events
+for IDS alerts. Several design decisions:
+
+Suricata alerts only, not flows or protocol metadata. MISP stores event intelligence, not
+telemetry. Sending all EVE events into MISP produces noisy event sprawl, oversized events, and
+poor analyst signal density. Zeek already retains rich protocol context in volumes for
+investigation; there is no gain from duplicating it into MISP.
+
+Direct to MISP, not through Shuffle. Shuffle sits beside the intake path for enrichment,
+notifications, and analyst workflows. Placing it inside the primary intake chain couples
+ingestion to orchestration availability: a Shuffle outage becomes an intake outage, and
+debugging starts to involve OpenSearch archaeology. MISP is the canonical persistence layer;
+provenance and classification belong before orchestration, not after.
+
+pymisp at the server version. The official MISP Python client handles authentication,
+serialisation, and error translation. Reimplementing those against the raw REST API offers no
+advantage and more surface area to maintain.
+
+Five-minute deduplication window. Suppresses alert storms from creating hundreds of MISP events
+for the same (signature, source IP, destination IP) tuple. The window is held in memory and
+resets on container restart; this is a deliberate trade-off favouring simplicity over perfect
+dedup across restarts, since a brief gap in dedup on restart is less harmful than persisting a
+dedup state file that could become stale.
+
+File offset tracking. The classifier writes its position in `eve.json` to a persistent volume
+after each successfully created MISP event. On restart it seeks to that offset, avoiding
+duplicate events without requiring a full replay scan.
+
+Tags: `Quiet-Room` identifies provenance; `tlp:white` carries sharing policy. These are
+separate concerns on purpose. The OpenCTI connector picks up `tlp:white` events automatically,
+so Quiet Room events flow through to OpenCTI without additional connector configuration.
+
+## Zeek JSON output
+
+Zeek writes logs in ASCII (TSV) format by default. A one-line `-e "redef LogAscii::use_json=T;"`
+argument switches the running instance to JSON, making log files more ergonomic for ad-hoc
+Python and jq queries without requiring a mounted policy file or image rebuild. The change is
+independent of the MISP pipeline; Zeek logs go to the `zeek-logs` volume and stay there for
+direct analyst access.
 
 ## Control script
 

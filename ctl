@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+trap 'echo ""; echo "Interrupted. Any containers already started are still running. Use ./ctl down to stop them."; exit 130' INT
+
 step() { echo ""; echo "==> $*"; }
 
 usage() {
@@ -15,9 +17,27 @@ usage() {
   echo "  down --volumes   Also remove all data volumes (requires confirmation)."
   echo "  purge            Remove everything: containers, volumes, networks, and locally"
   echo "                   built images. Requires confirmation."
+  echo "  wazuh-token [/path]  Acquire a Wazuh API JWT. With a path, make the full request."
 }
 
 # ── env file helpers ─────────────────────────────────────────────────────────
+
+_stage_envs() {
+  # Copy env.example → .env for any division missing a .env file.
+  # Prints the paths of files created so the caller can clean them up.
+  for dir in misp shuffle quiet-room long-table receiving-desk; do
+    if [ ! -f "${REPO}/${dir}/.env" ] && [ -f "${REPO}/${dir}/env.example" ]; then
+      cp "${REPO}/${dir}/env.example" "${REPO}/${dir}/.env"
+      echo "${REPO}/${dir}/.env"
+    fi
+  done
+}
+
+_unstage_envs() {
+  # Remove the temporary .env files created by _stage_envs.
+  local f
+  for f in "$@"; do rm -f "$f"; done
+}
 
 _env_get() {
   # _env_get KEY FILE  →  prints current value (empty string if unset)
@@ -76,7 +96,7 @@ cmd_init() {
   # Copy env.examples to .env files if they do not exist yet.
   step "Copying templates"
   local copied=0
-  for dir in misp shuffle quiet-room long-table; do
+  for dir in misp shuffle quiet-room long-table receiving-desk; do
     if [ ! -f "${REPO}/${dir}/.env" ]; then
       cp "${REPO}/${dir}/env.example" "${REPO}/${dir}/.env"
       echo "    created ${dir}/.env"
@@ -117,6 +137,8 @@ cmd_init() {
   fi
   _env_set MISP_API_KEY "${misp_key}" "${REPO}/long-table/.env"
   printf '    %-36s %s (synced from ADMIN_KEY)\n' MISP_API_KEY "long-table/.env"
+  _env_set MISP_API_KEY "${misp_key}" "${REPO}/quiet-room/.env"
+  printf '    %-36s %s (synced from ADMIN_KEY)\n' MISP_API_KEY "quiet-room/.env"
 
   # If MISP is already running with an existing database, apply the key directly.
   # configure_misp.sh only runs on first database initialisation, not on subsequent starts.
@@ -141,29 +163,50 @@ cmd_init() {
   _fill MINIO_ROOT_PASSWORD    "$(openssl rand -hex 24)" "${REPO}/long-table/.env"
   _fill RABBITMQ_PASSWORD      "$(openssl rand -hex 24)" "${REPO}/long-table/.env"
 
+  # quiet-room MISP classifier defaults
+  _fill MISP_URL       "https://misp:443" "${REPO}/quiet-room/.env"
+  _fill MISP_VERIFYCERT "false"           "${REPO}/quiet-room/.env"
+
+  # receiving-desk
+  _fill DOMAIN bootstrap.invalid "${REPO}/receiving-desk/.env"
+
   # Remaining items that require human decisions.
   step "Action required"
 
   local iface
   iface=$(_env_get SENSOR_INTERFACE "${REPO}/quiet-room/.env")
   if [ -z "${iface}" ]; then
-    echo "  Set SENSOR_INTERFACE in quiet-room/.env (interface carrying monitored traffic)."
     echo "  Available interfaces:"
     ip -o link show | awk -F': ' '{print "    " $2}'
+    if [ -t 0 ]; then
+      read -r -p "  Enter SENSOR_INTERFACE: " iface
+      if [ -n "${iface}" ]; then
+        _env_set SENSOR_INTERFACE "${iface}" "${REPO}/quiet-room/.env"
+        echo "  SENSOR_INTERFACE=${iface}  (written to quiet-room/.env)"
+      else
+        echo "  Skipped. Set SENSOR_INTERFACE in quiet-room/.env before running ./ctl up."
+      fi
+    else
+      echo "  Set SENSOR_INTERFACE in quiet-room/.env (interface carrying monitored traffic)."
+    fi
   else
     echo "  SENSOR_INTERFACE=${iface}"
   fi
 
   # Seed the Receiving Desk TLS certificate if the volume is empty.
   step "Receiving Desk TLS"
-  local cert_exists
+  local rd_domain cert_exists
+  rd_domain=$(_env_get DOMAIN "${REPO}/receiving-desk/.env")
+  rd_domain="${rd_domain:-bootstrap.invalid}"
+  # The volume is declared external in compose.yml and must exist before any compose command.
+  docker volume create certbot-letsencrypt > /dev/null
   cert_exists=$(docker run --rm \
-    -v receiving-desk_certbot-letsencrypt:/etc/letsencrypt \
-    alpine test -f /etc/letsencrypt/live/localhost/fullchain.pem && echo yes || echo no)
+    -v certbot-letsencrypt:/etc/letsencrypt \
+    alpine test -f /etc/letsencrypt/live/${rd_domain}/fullchain.pem && echo yes || echo no)
   if [ "$cert_exists" = "no" ]; then
-    bash "${REPO}/receiving-desk/init-certs.sh" localhost
+    bash "${REPO}/receiving-desk/init-certs.sh" "${rd_domain}"
   else
-    echo "    certificate already present"
+    echo "    certificate already present for ${rd_domain}"
   fi
 
   echo ""
@@ -179,6 +222,26 @@ cmd_up() {
   # reference as external. shuffle/ and long-table/ will fail to start if it is absent.
   step "MISP (creates pipeline-net)"
   docker compose -f "$REPO/misp/compose.yml" up -d --wait
+
+  local misp_key
+  misp_key=$(_env_get ADMIN_KEY "${REPO}/misp/.env")
+  if [ -n "$misp_key" ]; then
+    local attempt=0
+    printf "    Applying ADMIN_KEY"
+    while [ $attempt -lt 30 ]; do
+      result=$(docker exec misp-misp-1 sudo -u www-data \
+        /var/www/MISP/app/Console/cake User change_authkey 1 "${misp_key}" 2>&1) || true
+      if echo "$result" | grep -qiE "not found|error"; then
+        attempt=$((attempt + 1))
+        printf "."
+        sleep 10
+      else
+        echo " done"
+        echo "$result" | grep -v "audit message" | sed 's/^/    /'
+        break
+      fi
+    done
+  fi
 
   step "Shuffle"
   docker compose -f "$REPO/shuffle/compose.yml" up -d --wait
@@ -219,7 +282,7 @@ cmd_up() {
   echo "  MISP       https://127.0.0.1:8443"
   echo "  Shuffle    http://127.0.0.1:3001"
   echo "  OpenCTI    http://127.0.0.1:8888"
-  echo "  Wazuh API  https://127.0.0.1:55000"
+  echo "  Wazuh API  https://127.0.0.1:55000  (JWT only — use ./ctl wazuh-token)"
 }
 
 
@@ -240,10 +303,16 @@ cmd_down() {
     echo "WARNING: --volumes will permanently destroy all data volumes, including the Tor"
     echo "hidden service private key. Loss of that key means loss of the .onion address."
     echo ""
+    echo "NOTE: certbot-letsencrypt is declared external and survives this command."
+    echo "To remove it as well: docker volume rm certbot-letsencrypt"
+    echo ""
     read -r -p "Type YES to continue: " confirm
     [ "$confirm" = "YES" ] || { echo "Aborted."; exit 1; }
     flags="$flags --volumes"
   fi
+
+  local -a _staged
+  mapfile -t _staged < <(_stage_envs)
 
   step "Receiving Desk"
   docker compose -f "$REPO/receiving-desk/compose.yml" down $flags
@@ -260,6 +329,8 @@ cmd_down() {
   step "MISP"
   docker compose -f "$REPO/misp/compose.yml" down $flags
 
+  _unstage_envs "${_staged[@]+"${_staged[@]}"}"
+
   echo ""
   echo "Pipeline is down."
 }
@@ -271,6 +342,9 @@ cmd_purge() {
   echo ""
   read -r -p "Type YES to continue: " confirm
   [ "$confirm" = "YES" ] || { echo "Aborted."; exit 1; }
+
+  local -a _staged
+  mapfile -t _staged < <(_stage_envs)
 
   step "Receiving Desk"
   docker compose -f "$REPO/receiving-desk/compose.yml" down --volumes --remove-orphans --rmi local
@@ -287,15 +361,42 @@ cmd_purge() {
   step "MISP"
   docker compose -f "$REPO/misp/compose.yml" down --volumes --remove-orphans
 
+  _unstage_envs "${_staged[@]+"${_staged[@]}"}"
+
+  step "External volumes"
+  docker volume rm certbot-letsencrypt 2>/dev/null && echo "    removed certbot-letsencrypt" \
+    || echo "    certbot-letsencrypt not present (already removed or never created)"
+
+  step "Docker housekeeping"
+  docker system prune -f
+
   echo ""
-  echo "All containers, volumes, networks, and locally built images removed."
+  echo "All containers, volumes, networks, locally built images, and build cache removed."
   echo "To also remove pulled images: docker image prune -a"
 }
 
+cmd_wazuh_token() {
+  local pass token path="${1:-}"
+  pass=$(_env_get API_PASSWORD "${REPO}/quiet-room/.env")
+  if [ -z "$pass" ]; then
+    echo "API_PASSWORD not found in quiet-room/.env. Run ./ctl init first."
+    exit 1
+  fi
+  token=$(curl -sk -u "wazuh-wui:${pass}" \
+    -X POST "https://127.0.0.1:55000/security/user/authenticate?raw=true")
+  if [ -z "$path" ]; then
+    echo "$token"
+  else
+    curl -sk -H "Authorization: Bearer ${token}" "https://127.0.0.1:55000${path}"
+    echo ""
+  fi
+}
+
 case "${1:-}" in
-  init)  shift; cmd_init  "$@" ;;
-  up)    shift; cmd_up    "$@" ;;
-  down)  shift; cmd_down  "$@" ;;
-  purge) shift; cmd_purge "$@" ;;
-  *)     usage; exit 1 ;;
+  init)         shift; cmd_init         "$@" ;;
+  up)           shift; cmd_up           "$@" ;;
+  down)         shift; cmd_down         "$@" ;;
+  purge)        shift; cmd_purge        "$@" ;;
+  wazuh-token)  shift; cmd_wazuh_token  "$@" ;;
+  *)            usage; exit 1 ;;
 esac

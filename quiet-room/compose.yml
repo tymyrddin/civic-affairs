@@ -1,8 +1,8 @@
 # Quiet Room: signal intake, normalisation, and classification
 # Suricata and Zeek use network_mode: host for packet capture on the sensor interface.
 # Set SENSOR_INTERFACE in .env to the interface carrying monitored traffic (e.g. eth0, ens3).
-# Suricata and Zeek write logs to named Docker volumes. Wire those volumes into a log
-# forwarder (e.g. Filebeat) to feed Shuffle for MISP ingestion.
+# The classifier service tails Suricata EVE JSON and creates MISP events for IDS alerts.
+# Zeek logs accumulate in the zeek-logs volume for direct analyst access.
 # Image versions: verify at hub.docker.com/r/jasonish/suricata and hub.docker.com/r/zeek/zeek.
 
 services:
@@ -31,7 +31,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 120s
     logging:
       driver: json-file
       options:
@@ -42,7 +42,7 @@ services:
     image: docker.io/zeek/zeek:6.0.4
     restart: unless-stopped
     env_file: .env
-    command: ["zeek", "-i", "${SENSOR_INTERFACE}", "local"]
+    command: ["zeek", "-i", "${SENSOR_INTERFACE}", "local", "-e", "redef LogAscii::use_json=T;"]
     network_mode: host
     volumes:
       - zeek-logs:/opt/zeek/logs
@@ -104,6 +104,33 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  classifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.classifier
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - suricata-logs:/var/log/suricata:ro
+      - classifier-state:/state
+    networks:
+      - pipeline-net
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /state"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
 volumes:
   suricata-logs:
   suricata-rules:
@@ -112,6 +139,7 @@ volumes:
   wazuh-logs:
   wazuh-etc:
   wazuh-queue:
+  classifier-state:
 
 networks:
   quiet-room-internal:
@@ -119,3 +147,6 @@ networks:
     internal: true
   quiet-room-public:
     driver: bridge
+  pipeline-net:
+    external: true
+    name: pipeline-net

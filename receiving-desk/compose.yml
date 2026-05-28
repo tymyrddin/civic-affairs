@@ -16,10 +16,12 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    env_file: .env
     depends_on:
       - certbot
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl.conf.template:/etc/nginx/templates/ssl.conf.template:ro
       - ./nginx/security.txt:/var/www/html/.well-known/security.txt:ro
       - ./nginx/pgp-key.asc:/var/www/html/pgp-key.asc:ro
       - certbot-letsencrypt:/etc/letsencrypt:ro
@@ -45,6 +47,7 @@ services:
       - /tmp:size=64m,mode=1777
       - /var/cache/nginx:size=64m,mode=1777
       - /var/run:size=10m,mode=1777
+      - /etc/nginx/conf.d:size=1m,mode=1777
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/.well-known/security.txt || exit 1"]
       interval: 30s
@@ -59,6 +62,7 @@ services:
   certbot:
     image: certbot/certbot:v2.10.0
     restart: unless-stopped
+    env_file: .env
     volumes:
       - certbot-letsencrypt:/etc/letsencrypt
       - certbot-challenges:/var/www/certbot
@@ -70,7 +74,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "test -f /etc/letsencrypt/live/localhost/fullchain.pem"]
+      test: ["CMD-SHELL", "test -f /etc/letsencrypt/live/${DOMAIN}/fullchain.pem"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -86,6 +90,9 @@ services:
       context: ./tor
       dockerfile: Dockerfile
     restart: unless-stopped
+    depends_on:
+      nginx:
+        condition: service_healthy
     volumes:
       - tor-data:/var/lib/tor
     networks:

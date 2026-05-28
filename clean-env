@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+envs=(
+  misp/.env
+  shuffle/.env
+  quiet-room/.env
+  long-table/.env
+  receiving-desk/.env
+)
+
+found=()
+for f in "${envs[@]}"; do
+  [ -f "${REPO}/${f}" ] && found+=("${f}")
+done
+
+if [ ${#found[@]} -eq 0 ]; then
+  echo "No .env files found."
+  exit 0
+fi
+
+echo "Will remove:"
+for f in "${found[@]}"; do
+  echo "  ${f}"
+done
+echo ""
+read -r -p "Continue? [y/N] " confirm
+[[ "${confirm}" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+
+for f in "${found[@]}"; do
+  rm "${REPO}/${f}"
+  echo "  removed ${f}"
+done
+
+echo ""
+echo "Done. Run ./ctl init to regenerate."

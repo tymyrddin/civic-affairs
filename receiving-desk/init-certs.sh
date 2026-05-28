@@ -7,10 +7,8 @@
 #   docker compose -f receiving-desk/compose.yml run --rm certbot \
 #     certonly --webroot -w /var/www/certbot -d <domain.tld>
 #
-# Then reload Nginx:
-#   docker compose -f receiving-desk/compose.yml exec nginx nginx -s reload
-#
-# Also update nginx/nginx.conf: replace YOURDOMAIN.TLD with your actual domain.
+# Then set DOMAIN=yourdomain.tld in receiving-desk/.env and restart nginx:
+#   docker compose -f receiving-desk/compose.yml up -d nginx
 
 set -euo pipefail
 
