@@ -41,7 +41,7 @@ check_http_up() {
 # Containers that are Up without a healthcheck are considered acceptable.
 echo ""
 echo "Container health"
-for project in misp shuffle quiet-room long-table receiving-desk; do
+for project in misp shuffle quiet-room long-table receiving-desk receiving-desk/globaleaks; do
   file="$REPO/$project/compose.yml"
   failing=$(docker compose -f "$file" ps --format '{{.Name}} {{.Status}}' 2>/dev/null \
     | grep -vE "\(healthy\)" \
@@ -63,6 +63,7 @@ check_http    "Shuffle"      "http://localhost:3001/"
 check_http_up "OpenCTI"      "http://localhost:8888/health"
 check_http_up "Wazuh API"    "https://localhost:55000/" "-k"
 check_http    "security.txt" "http://localhost:8080/.well-known/security.txt"
+check_http_up "GlobaLeaks"  "https://localhost:8082" "-k"
 
 echo ""
 echo "$pass passed, $fail failed."

@@ -75,6 +75,11 @@ where the image allows it (Redis, Nginx, Tor, Certbot). Services that genuinely 
 access to their filesystem (MISP, MariaDB, Wazuh, OpenSearch, OpenCTI, Shuffle) are not run
 read-only.
 
+GlobaLeaks is likewise excluded from both `cap_drop: ALL` and `no-new-privileges: true`. The container starts as
+root to configure its internal Tor instance and ClamAV scanner, then drops to an unprivileged user; both hardening
+flags interfere with that startup sequence. Isolation is provided by the dedicated `globaleaks-net` bridge network,
+which connects to nothing outside the GlobaLeaks container, and the loopback-only port binding (`127.0.0.1:8082`).
+
 ## Port binding
 
 Internal-only services (MISP web UI, Wazuh REST API, Shuffle frontend, OpenCTI platform) bind

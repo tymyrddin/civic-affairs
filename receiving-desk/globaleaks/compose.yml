@@ -1,0 +1,41 @@
+# GlobaLeaks: anonymous submission platform with built-in Tor, ClamAV, and metadata stripping.
+# Image: globaleaks/globaleaks — verify tag at hub.docker.com/r/globaleaks/globaleaks/tags
+# Manages its own .onion address in the globaleaks-data volume.
+# Back up /var/globaleaks/onion from that volume — loss means loss of the .onion address.
+# Operator interface: http://127.0.0.1:8082 (first visit runs the setup wizard).
+# GlobaLeaks starts as root to configure its internal Tor and ClamAV, then drops privileges.
+# cap_drop: ALL and no-new-privileges: true both break this startup sequence and are omitted.
+# Isolation is provided by the dedicated bridge network and the loopback-only port binding.
+
+services:
+  globaleaks:
+    image: globaleaks/globaleaks:v5.0.93
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:8443"
+    volumes:
+      - globaleaks-data:/var/globaleaks
+      - ./index.html:/usr/share/globaleaks/client/index.html:ro
+      - ./custom.css:/usr/share/globaleaks/client/css/custom.css:ro
+    networks:
+      - globaleaks-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+volumes:
+  globaleaks-data:
+    external: true
+    name: globaleaks_globaleaks-data
+
+networks:
+  globaleaks-net:
+    driver: bridge

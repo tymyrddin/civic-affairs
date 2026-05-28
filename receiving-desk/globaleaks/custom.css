@@ -1,0 +1,56 @@
+#HeaderBox {
+  background-color: #f5f7fa;
+  border-bottom: 1px solid #c8d1e0;
+}
+
+#HeaderBox1 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+#Presentation {
+  display: block;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+#Presentation p {
+  text-align: left;
+}
+
+#WhistleblowerSubmitBox {
+  border-top: 1px solid #c8d1e0;
+  padding-top: 1.5rem;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+#WhistleblowingButton {
+  display: block;
+  margin: 1.5rem auto 0;
+}
+
+#WhistleblowerLoginBox {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #c8d1e0;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+#PrivacyBadge {
+  text-align: center !important;
+}
+
+#PrivacyBadgeTextBox {
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  max-width: 760px !important;
+  gap: 0.5rem !important;
+}

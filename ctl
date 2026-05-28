@@ -25,7 +25,7 @@ usage() {
 _stage_envs() {
   # Copy env.example → .env for any division missing a .env file.
   # Prints the paths of files created so the caller can clean them up.
-  for dir in misp shuffle quiet-room long-table receiving-desk; do
+  for dir in misp shuffle quiet-room long-table receiving-desk receiving-desk/globaleaks; do
     if [ ! -f "${REPO}/${dir}/.env" ] && [ -f "${REPO}/${dir}/env.example" ]; then
       cp "${REPO}/${dir}/env.example" "${REPO}/${dir}/.env"
       echo "${REPO}/${dir}/.env"
@@ -96,7 +96,7 @@ cmd_init() {
   # Copy env.examples to .env files if they do not exist yet.
   step "Copying templates"
   local copied=0
-  for dir in misp shuffle quiet-room long-table receiving-desk; do
+  for dir in misp shuffle quiet-room long-table receiving-desk receiving-desk/globaleaks; do
     if [ ! -f "${REPO}/${dir}/.env" ]; then
       cp "${REPO}/${dir}/env.example" "${REPO}/${dir}/.env"
       echo "    created ${dir}/.env"
@@ -198,8 +198,9 @@ cmd_init() {
   local rd_domain cert_exists
   rd_domain=$(_env_get DOMAIN "${REPO}/receiving-desk/.env")
   rd_domain="${rd_domain:-bootstrap.invalid}"
-  # The volume is declared external in compose.yml and must exist before any compose command.
+  # Both volumes are declared external in their compose files and must exist before any compose command.
   docker volume create certbot-letsencrypt > /dev/null
+  docker volume create globaleaks_globaleaks-data > /dev/null
   cert_exists=$(docker run --rm \
     -v certbot-letsencrypt:/etc/letsencrypt \
     alpine test -f /etc/letsencrypt/live/${rd_domain}/fullchain.pem && echo yes || echo no)
@@ -213,6 +214,9 @@ cmd_init() {
   echo "  URL defaults are set for local testing. For production, update:"
   echo "    BASE_URL in misp/.env"
   echo "    OPENCTI_BASE_URL and MISP_BASEURL in long-table/.env"
+  echo ""
+  echo "  GlobaLeaks generates its own credentials on first run."
+  echo "  Complete the setup wizard at https://127.0.0.1:8082 before publishing the .onion address."
   echo ""
   echo "Secrets written. Run ./ctl up when ready."
 }
@@ -276,6 +280,9 @@ cmd_up() {
   step "Receiving Desk"
   docker compose -f "$REPO/receiving-desk/compose.yml" up -d --wait
 
+  step "GlobaLeaks"
+  docker compose -f "$REPO/receiving-desk/globaleaks/compose.yml" up -d --wait
+
   echo ""
   echo "Pipeline is up."
   echo ""
@@ -283,6 +290,7 @@ cmd_up() {
   echo "  Shuffle    http://127.0.0.1:3001"
   echo "  OpenCTI    http://127.0.0.1:8888"
   echo "  Wazuh API  https://127.0.0.1:55000  (JWT only — use ./ctl wazuh-token)"
+  echo "  GlobaLeaks https://127.0.0.1:8082   (first visit: setup wizard; self-signed cert)"
 }
 
 
@@ -300,11 +308,12 @@ cmd_down() {
 
   if [ "$volumes" = true ]; then
     echo ""
-    echo "WARNING: --volumes will permanently destroy all data volumes, including the Tor"
-    echo "hidden service private key. Loss of that key means loss of the .onion address."
+    echo "WARNING: --volumes will permanently destroy all data volumes, including two Tor"
+    echo "hidden service private keys: tor-data (static onion) and globaleaks_globaleaks-data (intake"
+    echo "onion). Loss of either key means loss of the corresponding .onion address."
     echo ""
-    echo "NOTE: certbot-letsencrypt is declared external and survives this command."
-    echo "To remove it as well: docker volume rm certbot-letsencrypt"
+    echo "NOTE: certbot-letsencrypt and globaleaks_globaleaks-data are declared external and survive this command."
+    echo "To remove them as well: docker volume rm certbot-letsencrypt globaleaks_globaleaks-data"
     echo ""
     read -r -p "Type YES to continue: " confirm
     [ "$confirm" = "YES" ] || { echo "Aborted."; exit 1; }
@@ -313,6 +322,9 @@ cmd_down() {
 
   local -a _staged
   mapfile -t _staged < <(_stage_envs)
+
+  step "GlobaLeaks"
+  docker compose -f "$REPO/receiving-desk/globaleaks/compose.yml" down $flags
 
   step "Receiving Desk"
   docker compose -f "$REPO/receiving-desk/compose.yml" down $flags
@@ -336,15 +348,18 @@ cmd_down() {
 }
 
 cmd_purge() {
-  echo "This will permanently destroy all pipeline data, including the Tor hidden service"
-  echo "private key. Back up the tor-data volume before continuing if you need to preserve"
-  echo "the .onion address."
+  echo "This will permanently destroy all pipeline data, including two Tor hidden service"
+  echo "private keys: tor-data (static onion) and globaleaks_globaleaks-data (intake onion). Back up"
+  echo "both volumes before continuing if you need to preserve the .onion addresses."
   echo ""
   read -r -p "Type YES to continue: " confirm
   [ "$confirm" = "YES" ] || { echo "Aborted."; exit 1; }
 
   local -a _staged
   mapfile -t _staged < <(_stage_envs)
+
+  step "GlobaLeaks"
+  docker compose -f "$REPO/receiving-desk/globaleaks/compose.yml" down --volumes --remove-orphans
 
   step "Receiving Desk"
   docker compose -f "$REPO/receiving-desk/compose.yml" down --volumes --remove-orphans --rmi local
@@ -366,6 +381,8 @@ cmd_purge() {
   step "External volumes"
   docker volume rm certbot-letsencrypt 2>/dev/null && echo "    removed certbot-letsencrypt" \
     || echo "    certbot-letsencrypt not present (already removed or never created)"
+  docker volume rm globaleaks_globaleaks-data 2>/dev/null && echo "    removed globaleaks_globaleaks-data" \
+    || echo "    globaleaks_globaleaks-data not present (already removed or never created)"
 
   step "Docker housekeeping"
   docker system prune -f

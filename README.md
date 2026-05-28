@@ -15,7 +15,8 @@ Wazuh      ┘    filter           store, route              correlate
                 normalise                                   interpret
                 classify                                    escalate
 
-Receiving Desk ──► Quiet Room │ Long Table │ Repair Shop
+Receiving Desk (static)    ──► Quiet Room │ Long Table │ Repair Shop
+GlobaLeaks     (intake)    ──► operator review ──► manual routing
 ```
 
 The Quiet Room filters, normalises, and classifies incoming signals. Classified material is
@@ -24,8 +25,10 @@ interprets, and escalates. Wazuh supplies selective host telemetry; selection is
 decision, not an analysis-time filter. Automation assists prioritisation. Adjudication remains
 with analysts. Provenance records track acquisition path, not truth ancestry.
 
-The Receiving Desk handles disclosure intake and routes each case to the appropriate division.
-The Repair Shop handles devices that require physical access.
+The Receiving Desk serves static discovery material (security.txt, PGP key) over clearnet and a
+static onion. GlobaLeaks provides the anonymous submission form on a separate onion, with ClamAV
+scanning and metadata stripping built in. Routing from GlobaLeaks to the appropriate division is
+manual. The Repair Shop handles devices that require physical access.
 
 ## Requirements
 
@@ -79,7 +82,8 @@ Per-division Docker Compose files. One control script.
 ```
 
 `misp/` starts first and creates `pipeline-net`. `shuffle/` and `long-table/` join it as
-external and will not start without it.
+external and will not start without it. `receiving-desk/globaleaks/` runs on its own isolated
+bridge network and starts independently.
 
 Each division has an `env.example` showing available variables. `./ctl init` copies these to `.env` files, fills in
 generated secrets, and seeds a bootstrap TLS certificate for the Receiving Desk. Manual copying is not needed.
@@ -172,6 +176,20 @@ and replace `receiving-desk/nginx/pgp-key.asc` with the actual public key. The T
 on first start and stored in the `tor-data` volume. Back up the hostname and private key files from that volume; losing
 the private key means losing the `.onion` address permanently.
 
+### GlobaLeaks
+
+Available at https://127.0.0.1:8082. The browser will warn about a self-signed certificate; accept it to proceed.
+
+The first visit runs the setup wizard, which configures the node name, administrator account, and notification
+settings. Submissions are not available until the wizard completes.
+
+GlobaLeaks manages its own Tor hidden service internally. The `.onion` address appears in the admin panel once setup
+is complete. The private key lives in the `globaleaks_globaleaks-data` volume; backing it up is worth doing once the address has
+been published, for the same reason as the Receiving Desk's Tor key.
+
+Routing from GlobaLeaks to the appropriate division is manual. Submissions appear in the operator interface at
+https://127.0.0.1:8082; the analyst reviews and routes each one.
+
 ## Production gaps
 
 The pipeline runs end-to-end locally after `./ctl init` and `./ctl up`. The following are not yet configured and are
@@ -205,11 +223,19 @@ worth addressing before a production deployment.
   storage once the address has been published, in `security.txt`, on the organisation's website, or anywhere else.
   Losing the key after publication means the published address stops working and every reference to it needs updating.
 
+- GlobaLeaks setup: the setup wizard runs on first visit to https://127.0.0.1:8082. It sets the node name, admin
+  credentials, and notification settings; the platform is not operational until it completes.
+
+- GlobaLeaks .onion key: GlobaLeaks manages its own Tor hidden service in the `globaleaks_globaleaks-data` volume. The `.onion`
+  address appears in the admin panel once setup is complete. The private key from that volume is worth backing up
+  before publishing the address anywhere; losing it means the published address stops working.
+
 - Firewall: Wazuh agent ports (1514/tcp and 1514/udp) are bound to `0.0.0.0`; all other service ports bind to
   `127.0.0.1`. Restrict inbound access at the host firewall to match what actually needs to be reachable from outside.
 
 - Volume backups: no off-host backup is configured for the named Docker volumes holding live data (MISP database,
   OpenCTI store, Wazuh state). A fresh `./ctl up` does not restore them.
 
-- External volume: `certbot-letsencrypt` is declared external in `receiving-desk/compose.yml` and survives
-  `./ctl down --volumes`. `./ctl purge` removes it. To remove it by hand: `docker volume rm certbot-letsencrypt`.
+- External volumes: `certbot-letsencrypt` and `globaleaks_globaleaks-data` are declared external and survive
+  `./ctl down --volumes`. `./ctl purge` removes both. To remove them by hand:
+  `docker volume rm certbot-letsencrypt globaleaks_globaleaks-data`.
