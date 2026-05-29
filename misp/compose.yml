@@ -16,6 +16,16 @@ services:
       - misp-data:/var/www/MISP/app/files
       - misp-logs:/var/www/MISP/app/tmp/logs
       - ./10-supervisor.conf:/etc/supervisor/conf.d/10-supervisor.conf:ro
+      # Branding from the repo so it survives a clone. custom.css lands in the image
+      # webroot; the logo is served as the home icon (files/img/custom) and as the host
+      # org logo (files/img/orgs/<org name>.png, matched by org name). The MISP.custom_css,
+      # MISP.home_logo and MISP.title_text settings are applied by ctl on start.
+      - ./custom.css:/var/www/MISP/app/webroot/css/custom.css:ro
+      # home_logo: MISP validates the filename against webroot/img/custom but renders it
+      # from files/img/custom, so the logo is mounted into both.
+      - ./logo.png:/var/www/MISP/app/webroot/img/custom/cde-logo.png:ro
+      - ./logo.png:/var/www/MISP/app/files/img/custom/cde-logo.png:ro
+      - "./logo.png:/var/www/MISP/app/files/img/orgs/Civic Defence Establishment.png:ro"
     tmpfs:
       - /run:size=64m,mode=0755
     ports:

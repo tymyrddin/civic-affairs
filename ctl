@@ -247,6 +247,18 @@ cmd_up() {
     done
   fi
 
+  # Branding: point MISP at the repo's custom CSS and logo and set the page title.
+  # The files arrive via the compose mounts; this only sets the DB settings, and is
+  # idempotent, so it runs safely on every start and reproduces on a clone.
+  printf "    Applying branding"
+  for kv in "MISP.custom_css custom.css" "MISP.home_logo cde-logo.png" "MISP.title_text Civic Defence Establishment"; do
+    setting=${kv%% *}; value=${kv#* }
+    docker exec misp-misp-1 sudo -u www-data \
+      /var/www/MISP/app/Console/cake Admin setSetting "$setting" "$value" >/dev/null 2>&1 || true
+    printf "."
+  done
+  echo " done"
+
   step "Shuffle"
   docker compose -f "$REPO/shuffle/compose.yml" up -d --wait
 

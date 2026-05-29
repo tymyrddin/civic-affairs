@@ -1,0 +1,23 @@
+/* Civic Defence Establishment palette for MISP: navy with a gold edge.
+   Loaded after main.css via the MISP.custom_css setting, so these override the
+   stock Bootstrap navbar. Kept to the top bar and its links to avoid fighting the
+   rest of MISP's styling. Tune the two colours below. */
+
+.navbar-inner,
+.navbar-lab .navbar-inner {
+  background: #1b2a4a !important;
+  border-bottom: 2px solid #c5a253 !important;
+}
+
+.navbar .nav > li > a,
+.navbar-lab .nav > li > a,
+.navbar .brand {
+  color: #e8eaf0 !important;
+}
+
+.navbar .nav > li > a:hover,
+.navbar .nav > li > a:focus,
+.navbar .nav > li.active > a,
+.navbar-lab .nav > li > a:hover {
+  color: #c5a253 !important;
+}
