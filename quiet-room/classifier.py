@@ -162,13 +162,13 @@ def tail_alerts(misp: PyMISP) -> None:
                         uuid = result.get("Event", {}).get("uuid", "?")
                         log.info("created     event=%s sig=%s %s->%s", uuid, sig_id, src, dst)
                         dedup[key] = now
-                        write_offset(offset)
                         backoff = BACKOFF_BASE
                         break
                     except Exception as exc:
                         attempt += 1
                         log.warning("MISP error (attempt %d): %s", attempt, exc)
                         time.sleep(min(backoff * (2 ** (attempt - 1)), BACKOFF_MAX))
+                write_offset(offset)
 
         write_offset(offset)
         time.sleep(POLL_INTERVAL)

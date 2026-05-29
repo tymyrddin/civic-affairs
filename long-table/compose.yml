@@ -104,13 +104,18 @@ services:
       CONNECTOR_NAME: MISP
       CONNECTOR_SCOPE: misp-indicator,misp-sighting
       CONNECTOR_LOG_LEVEL: info
-      MISP_URL: http://misp
+      MISP_URL: https://misp
       MISP_REFERENCE_URL: ${MISP_BASEURL}
       MISP_KEY: ${MISP_API_KEY}
       MISP_SSL_VERIFY: "false"
       MISP_DATETIME_ATTRIBUTE: timestamp
       MISP_REPORT_DESCRIPTION: event.info
       MISP_IMPORT_TAGS: Long-Table,tlp:white,tlp:green
+      # Without these the connector defaults to creating nothing: it imports only the
+      # author identity and markings, so MISP events never materialise in OpenCTI.
+      MISP_CREATE_REPORTS: "true"
+      MISP_CREATE_INDICATORS: "true"
+      MISP_CREATE_OBSERVABLES: "true"
       MISP_INTERVAL: "1"
     depends_on:
       opencti:

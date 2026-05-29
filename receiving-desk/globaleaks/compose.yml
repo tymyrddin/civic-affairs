@@ -17,6 +17,10 @@ services:
       - globaleaks-data:/var/globaleaks
       - ./index.html:/usr/share/globaleaks/client/index.html:ro
       - ./custom.css:/usr/share/globaleaks/client/css/custom.css:ro
+      # Logo served as a same-origin static asset (CSP allows img-src 'self' only,
+      # so a mounted file works where a data: URI would be blocked). custom.css swaps
+      # #LogoBox img to this, so the branding lives in the repo, not the volume DB.
+      - ./logo.png:/usr/share/globaleaks/client/css/logo.png:ro
     networks:
       - globaleaks-net
     healthcheck:

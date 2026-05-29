@@ -3,6 +3,31 @@
   border-bottom: 1px solid #c8d1e0;
 }
 
+/* Replace the default logo (served from the volume DB at s/logo) with the repo
+   asset, so the branding is reproducible on a fresh clone. The content swap works
+   on the img element in Firefox/Tor Browser and Chromium. */
+/* Branding lives in the repo, not the volume DB. Rather than swap the img src
+   (which collides with GlobaLeaks' img-fluid max-width), hide the DB-served logo
+   and paint the repo asset as a background on its clickable box. Deterministic
+   sizing, no distortion. Tune the single size value below (keep width == height). */
+#LogoBox {
+  width: 180px;
+  height: 180px;
+  margin: 0 auto;
+  background-image: url("logo.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+#LogoBox img {
+  display: none;
+}
+
+#TitleBox {
+  text-align: center;
+}
+
 #HeaderBox1 {
   display: flex;
   flex-direction: column;

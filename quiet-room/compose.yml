@@ -119,12 +119,18 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # Forward-progress check: healthy when the stored offset has kept pace with
+    # eve.json (caught up, whether idle or flowing). Persistently behind means the
+    # classifier is stuck (the permission-loop bug, or MISP unreachable spinning the
+    # retry), which trips unhealthy after the retries. A 64KB tolerance absorbs normal
+    # tail lag between the 1s poll and this check. Idle traffic does not false-alarm,
+    # because with nothing arriving the offset already equals the file size.
     healthcheck:
-      test: ["CMD-SHELL", "test -d /state"]
+      test: ["CMD-SHELL", "python3 -c \"import os,sys; off=int((open('/state/offset').read().strip() or '0')) if os.path.exists('/state/offset') else 0; sz=os.path.getsize('/var/log/suricata/eve.json') if os.path.exists('/var/log/suricata/eve.json') else 0; sys.exit(0 if off >= sz - 65536 else 1)\""]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     logging:
       driver: json-file
       options:
