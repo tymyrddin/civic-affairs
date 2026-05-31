@@ -276,7 +276,9 @@ cmd_up() {
     ip -o link show | awk -F': ' '{print "  " $2}'
     exit 1
   fi
-  docker compose -f "$REPO/quiet-room/compose.yml" up -d --wait
+  # --build so classifier.py code changes always reach the running container; the
+  # classifier image is build-based and `up` alone would reuse a stale image.
+  docker compose -f "$REPO/quiet-room/compose.yml" up -d --build --wait
 
   step "Long Table"
   local misp_key lt_profile=""

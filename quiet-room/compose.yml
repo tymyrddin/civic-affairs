@@ -1,8 +1,11 @@
 # Quiet Room: signal intake, normalisation, and classification
 # Suricata and Zeek use network_mode: host for packet capture on the sensor interface.
 # Set SENSOR_INTERFACE in .env to the interface carrying monitored traffic (e.g. eth0, ens3).
-# The classifier service tails Suricata EVE JSON and creates MISP events for IDS alerts.
-# Zeek logs accumulate in the zeek-logs volume for direct analyst access.
+# The classifier service tails Suricata EVE JSON and Zeek logs and posts a MISP
+# event for every signal (tlp:white, reliability 2); a cross-sensor match on a
+# destination IP adds a correlated event held for analyst review. The drop log
+# under classifier-state is for discredited-source material (written externally,
+# pruned here). Zeek logs accumulate in the zeek-logs volume, read-only here.
 # Image versions: verify at hub.docker.com/r/jasonish/suricata and hub.docker.com/r/zeek/zeek.
 
 services:
@@ -43,6 +46,9 @@ services:
     restart: unless-stopped
     env_file: .env
     command: ["zeek", "-i", "${SENSOR_INTERFACE}", "local", "-e", "redef LogAscii::use_json=T;"]
+    # Zeek writes its logs to the working directory, so point it at the volume mount;
+    # otherwise the logs land in the container root and vanish on recreate.
+    working_dir: /opt/zeek/logs
     network_mode: host
     volumes:
       - zeek-logs:/opt/zeek/logs
@@ -112,6 +118,7 @@ services:
     env_file: .env
     volumes:
       - suricata-logs:/var/log/suricata:ro
+      - zeek-logs:/opt/zeek/logs:ro
       - classifier-state:/state
     networks:
       - pipeline-net
