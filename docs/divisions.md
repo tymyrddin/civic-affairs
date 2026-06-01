@@ -45,18 +45,6 @@ MISP alone and MISP + OpenCTI is unresolved.
 
 Stack: MISP, Shuffle, RIPE NCC API, CIRCL passive DNS, crt.sh. OpenCTI: under evaluation.
 
-## Repair Shop
-
-Active hardware and firmware analysis. Works with devices in hand under conditions that do not
-permit engagement through normal channels. JTAG and SWD debug interfaces, physical teardown,
-direct flash storage access, and offline binary analysis.
-
-Covers three classes of work: devices that cannot be assessed through network-layer approaches,
-supply chain material requiring verification before deployment, and hardware submitted through the
-Receiving Desk whose provenance or contents warrant examination before the material is trusted.
-
-Analysis runs in offline, isolated environments. Output is reviewed before anything leaves.
-
 ## Receiving Desk
 
 Coordinated vulnerability disclosure intake. Three channels: security.txt for standard
@@ -64,9 +52,8 @@ submissions, PGP-encrypted email for sensitive identified submissions, and a Tor
 anonymous material whose provenance is not recorded.
 
 Every submission produces a case record. Triage routes each case to the appropriate division:
-signals-layer findings to the Quiet Room, intelligence-layer findings to the Long Table, hardware
-or firmware submissions to the Repair Shop. Submissions spanning categories are split and routed
-separately.
+signals-layer findings to the Quiet Room, intelligence-layer findings to the Long Table.
+Submissions spanning categories are split and routed separately.
 
 Identified submitters receive acknowledgement within two working days, triage determination within
 ten, and escalation status within thirty. Anonymous submissions receive their case reference
